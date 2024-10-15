@@ -33,6 +33,7 @@ class PlanningTask:
         self.rules = None
         self.outputJSON = None
         self.task = self.determineTask()
+        self.gptModel = self.determineGPTModelBasedOnReasoningType()
     
     @staticmethod
     def convertinputDataDictsToSingleJSON(inputDataDicts):
@@ -59,14 +60,28 @@ Option 2: If the state history (STATE HISTORY) does not provide sufficient infor
     "nodes": This must contain all the graph's nodes in the networkx graph. The nodes will represent subtasks that you will take. Each node will be a JSON object that contains "id" key. The "id" should be a human-readable short description of the node. Each node MUST also contain a "description" key that describes the node's function in more details than the "id". A maximum of one sentence is allowed. Each node must include its reasoning type "type" (type I for direct computation tasks vs. type II for more multi-step computations). If a node is a conditional node, you should add the key "conditional" to it. The graph MUST NOT contain a "START" node. The graph MUST contain an "END" node to represent the termination node of the algorithm.
     "edges": This must contain all the graph's edges. If an edge is a conditional edge, you should add the key "condition" that specifies the condition as a string. Each edge is an object that contains a "source" and a "target" node ids. The ids should match the node ids you define.
 '''
-        elif reasoningType == 'type I':
+        elif reasoningType == 'type I' or reasoningType == 'I':
             return 'Use the provided state history (STATE HISTORY) to achieve the goal (GOAL). You MUST return a pure JSON object that contains the following key/value pair: key is: “answer” and its value is: the actual answer that you found from the state. It cannot be ambigious, and it cannot be another task. It must be a clear computed returned value.'
         
-        elif reasoningType == 'type II':
+        elif reasoningType == 'type II' or reasoningType == 'II':
             return '''If the state history (STATE HISTORY) does not provide sufficient information to directly satisfy the goal (GOAL), create a Python networkx graph represented in JSON format to outline the algorithm or plan you will use to achieve the goal, given the current state history (STATE HISTORY). The graph MUST be a JSON object that contains the following keys:
     "nodes": This must contain all the graph's nodes in the networkx graph. The nodes will represent subtasks that you will take. Each node will be a JSON object that contains "id" key. The "id" should be a human-readable short description of the node. Each node MUST also contain a "description" key that describes the node's function in more details than the "id". A maximum of one sentence is allowed. Each node must include its reasoning type "type" (type I for direct computation tasks vs. type II for more multi-step computations). If a node is a conditional node, you should add the key "conditional" to it. The graph MUST NOT contain a "START" node. The graph MUST contain an "END" node to represent the termination node of the algorithm.
     "edges": This must contain all the graph's edges. If an edge is a conditional edge, you should add the key "condition" that specifies the condition as a string. Each edge is an object that contains a "source" and a "target" node ids. The ids should match the node ids you define.
 '''
+
+    """We use this function to save costs on GPT calls. If a task is simple, use a simple and cheaper model."""
+    def determineGPTModelBasedOnReasoningType(self):
+        reasoningType = self.reasoningType
+        if reasoningType is None or reasoningType == '':
+            # Should return a more sophisticated model
+            return GPT.GPT4OMNI
+        elif reasoningType == 'type I' or reasoningType == 'I':
+            # Can return a simpler model since the task is simple
+            return GPT.GPT4OMNIMINI
+        elif reasoningType == 'type II' or reasoningType == 'II':
+            # Should return a more sophisticated model
+            return GPT.GPT4OMNI
+
 
     def assembleRules(self):
         rulesString = ''
@@ -127,10 +142,9 @@ If you end up creating a graph (Option 2), avoid creating nodes from the state h
             for key, value in state.items():
                 print(f'{key}: {value}')
         print('-------------------------')
-            
-        # print(self.prompt)
+
         """ DIRECTLY USING OPENAI """
-        outputJSON, _ = await gpt(GPT.GPT4OMNI, self.systemMessage, self.prompt, outputType=GPTOutputType.JSON)
+        outputJSON, _ = await gpt(self.gptModel, self.systemMessage, self.prompt, outputType=GPTOutputType.JSON)
 
         print('GPT OUTPUT:')
         print(outputJSON)

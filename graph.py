@@ -74,8 +74,8 @@ class AlgorithmGraph:
         # If task is conditional, we will choose successors who match the condition.
         if isTaskConditional is True:
             print(f'~~ Task: {task.humanReadableName} ({task.task}) is conditional')
-            stateHistory = task.state
-            nextTask = await self.pickNextTask(stateHistory, successors)
+            formattedStateHistory = task.formatState()
+            nextTask = await self.pickNextTask(formattedStateHistory, successors)
             print(f'~~ Picked: {task.humanReadableName}')
             await self.runThroughGraph(nextTask)
         else:

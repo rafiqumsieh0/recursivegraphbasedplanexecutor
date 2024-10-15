@@ -30,6 +30,7 @@ pillar.
 caterpillars.
 How long would it take a mauve caterpillar to crawl around the equator
 of Pluto?''': 'RUNNING'}]
+    
     # The  goal is the preferred OUTPUT of the system
     goal = 'Solve the problem correctly.'
     
