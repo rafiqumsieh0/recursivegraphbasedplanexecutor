@@ -38,13 +38,14 @@ of Pluto?''': 'RUNNING'}]
     expectedOutputJSONSchema = ['output']
     description = ''
     reasoningType = ''
-    parentTaskName = None
-    inputTuple = (rulesList, state, goal, expectedOutputJSONSchema, description, reasoningType, parentTaskName)
+    parentTask = None
+    inputTuple = (rulesList, state, goal, expectedOutputJSONSchema, description, reasoningType, parentTask)
     humanReadableTaskName = 'CREATE MAIN PLAN ALGORITHM GRAPH'
     systemMessage = SystemMessage.PLANNER
 
     mainPlanTask = PlanningTask(humanReadableTaskName, systemMessage, inputTuple)
     await mainPlanTask.run()
+    print(f'~~ FINAL STATE: {mainPlanTask.state}')
 
 if __name__ == '__main__':
 

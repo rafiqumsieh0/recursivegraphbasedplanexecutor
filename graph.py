@@ -33,8 +33,24 @@ class AlgorithmGraph:
     # Provide it with the graph and the task, and it will recursively keep stepping through the graph until the END node is reached for the main graph.
     async def runThroughGraph(self, graph, task):
         if task.humanReadableName == 'END' or task.humanReadableName == 'DONE':
-            # task.state.append({task.humanReadableName: 'DONE'})
-            task.state.append({task.parentTaskName: 'DONE'})
+
+            # TODO: NEED TO DECIDE BETWEEN CODE BLOCK #1 (Removing subtasks) AND CODE BLOCK #2 (Keeping subtasks)
+            #CODE BLOCK #1 (CURRENTLY ACTIVE): Adding this code to remove subTasks and update parent task with latest task state
+            if task.parentTask is not None and (task.parentTask.reasoningType == 'type II' or task.parentTask.reasoningType == 'II'):
+                parentStateIndex = -1
+                for stateIndex, stateItem in enumerate(task.state):
+                    for stateKey in stateItem.keys():
+                        if stateItem.get(stateKey) == task.parentTask.humanReadableName:
+                            parentStateIndex = stateIndex
+                if parentStateIndex > -1:
+                    task.state[parentStateIndex][task.parentTask.humanReadableName] = task.parentTask.latestOutput
+                task.state = task.state[: parentStateIndex + 1]
+            else:
+                task.state.append({task.parentTask.humanReadableName: 'DONE'})    
+
+            # CODE BLOCK #2 (CURRENTLY COMMENTED): 
+            # task.state.append({task.parentTask.humanReadableName: 'DONE'})
+
             print('~~ RETURNING ........')
             return task.state
         
@@ -95,7 +111,7 @@ class AlgorithmGraph:
     
     async def pickNextTask(self, stateHistory, successors):
         formattedSuccessors = self.formatSuccessors(successors)
-        prompt = f'''Given the following state history (STATE HISTORY) of the steps taken along with their outputs, and the following potential next steps (POTENTIAL NEXT STEPS). Pick the next step whose condition matches the state history (STATE HISTORY):
+        prompt = f'''Given the following state history (STATE HISTORY) of the steps taken along with their outputs, and the following potential next steps (POTENTIAL NEXT STEPS). Pick the next step whose condition matches what is in the state history (STATE HISTORY):
 
 STATE HISTORY
 {stateHistory}
@@ -105,20 +121,24 @@ POTENTIAL NEXT STEPS
 
 OUTPUT FORMAT (JSON)
 Your output MUST be a JSON object that contains the following key:
-    "next_task_name": The exact task name of the next task that you pick based on the state history (STATE HISTORY).
+    "next_task_name": The exact task name of the next task that you pick from the POTENTIAL NEXT STEPS based on the state history (STATE HISTORY).
 
 '''
-
+        print(f'~~ Pick Next Task Prompt: {prompt}')
         outputJSON, _ = await gpt(GPT.GPT4OMNI, SystemMessage.PLANNER, prompt, outputType=GPTOutputType.JSON)
         pickedNextTaskName = outputJSON['next_task_name']
-        nextTask = list(filter(lambda n: n.humanReadableName == pickedNextTaskName, successors))[0]
+        print(f'~~ Picked Next Task: {pickedNextTaskName}')
+        print('FROM:')
+        for successor in successors:
+            print(successor.humanReadableName)
+        nextTask = list(filter(lambda n: n.humanReadableName == pickedNextTaskName.strip(), successors))[0]
 
         return nextTask
 
 
     @staticmethod
     def formatSuccessors(successors):
-        formattedSuccessorsList =  list(map(lambda successor: f'''Task Name: {successor.humanReadableName} \n Condition: {successor.condition}''', successors))
+        formattedSuccessorsList =  list(map(lambda successor: f'''Task Name: {successor.humanReadableName}\nCondition: {successor.condition}''', successors))
 
         return '\n\n'.join(formattedSuccessorsList)
         

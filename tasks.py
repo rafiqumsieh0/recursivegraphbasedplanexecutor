@@ -17,7 +17,7 @@ The way the Planning Task works is the following:
 class PlanningTask:
     def __init__(self, humanReadableName, systemMessage, inputTuple, isConditionalNode=False):
 
-        rulesList, state, goal, expectedOutputJSONSchema, description, reasoningType, parentTaskName = inputTuple
+        rulesList, state, goal, expectedOutputJSONSchema, description, reasoningType, parentTask = inputTuple
 
         self.humanReadableName = humanReadableName
         self.systemMessage = systemMessage
@@ -28,12 +28,13 @@ class PlanningTask:
         self.expectedOutputJSONSchema = expectedOutputJSONSchema
         self.description = description
         self.reasoningType = reasoningType
-        self.parentTaskName = parentTaskName
+        self.parentTask = parentTask
         self.condition = None
         self.rules = None
         self.outputJSON = None
         self.task = self.determineTask()
         self.gptModel = self.determineGPTModelBasedOnReasoningType()
+        self.latestOutput = None
     
     @staticmethod
     def convertinputDataDictsToSingleJSON(inputDataDicts):
@@ -61,12 +62,15 @@ Option 2: If the state history (STATE HISTORY) does not provide sufficient infor
     "edges": This must contain all the graph's edges. If an edge is a conditional edge, you should add the key "condition" that specifies the condition as a string. Each edge is an object that contains a "source" and a "target" node ids. The ids should match the node ids you define.
 '''
         elif reasoningType == 'type I' or reasoningType == 'I':
-            return 'Use the provided state history (STATE HISTORY) to achieve the goal (GOAL). You MUST return a pure JSON object that contains the following key/value pair: key is: “answer” and its value is: the actual answer that you found from the state. It cannot be ambigious, and it cannot be another task. It must be a clear computed returned value.'
+            return '''Use the provided state history (STATE HISTORY) to achieve the goal (GOAL). You MUST return a pure JSON object that contains the following key/value pairs:
+"reasoning": the reasoning that justifies the answer. You can use intermediate results from this reasoning to form your final answer.
+“answer”: the actual answer that you found from the state and your reasoning above. It cannot be ambigious, and it cannot be another task. It must be a clear computed returned value.
+'''
         
         elif reasoningType == 'type II' or reasoningType == 'II':
             return '''If the state history (STATE HISTORY) does not provide sufficient information to directly satisfy the goal (GOAL), create a Python networkx graph represented in JSON format to outline the algorithm or plan you will use to achieve the goal, given the current state history (STATE HISTORY). The graph MUST be a JSON object that contains the following keys:
-    "nodes": This must contain all the graph's nodes in the networkx graph. The nodes will represent subtasks that you will take. Each node will be a JSON object that contains "id" key. The "id" should be a human-readable short description of the node. Each node MUST also contain a "description" key that describes the node's function in more details than the "id". A maximum of one sentence is allowed. Each node must include its reasoning type "type" (type I for direct computation tasks vs. type II for more multi-step computations). If a node is a conditional node, you should add the key "conditional" to it. The graph MUST NOT contain a "START" node. The graph MUST contain an "END" node to represent the termination node of the algorithm.
-    "edges": This must contain all the graph's edges. If an edge is a conditional edge, you should add the key "condition" that specifies the condition as a string. Each edge is an object that contains a "source" and a "target" node ids. The ids should match the node ids you define.
+"nodes": This must contain all the graph's nodes in the networkx graph. The nodes will represent subtasks that you will take. Each node will be a JSON object that contains "id" key. The "id" should be a human-readable short description of the node. Each node MUST also contain a "description" key that describes the node's function in more details than the "id". A maximum of one sentence is allowed. Each node must include its reasoning type "type" (type I for direct computation tasks vs. type II for more multi-step computations). If a node is a conditional node, you should add the key "conditional" to it. The graph MUST NOT contain a "START" node. The graph MUST contain an "END" node to represent the termination node of the algorithm.
+"edges": This must contain all the graph's edges. If an edge is a conditional edge, you should add the key "condition" that specifies the condition as a string. Each edge is an object that contains a "source" and a "target" node ids. The ids should match the node ids you define.
 '''
 
     """We use this function to save costs on GPT calls. If a task is simple, use a simple and cheaper model."""
@@ -77,7 +81,7 @@ Option 2: If the state history (STATE HISTORY) does not provide sufficient infor
             return GPT.GPT4OMNI
         elif reasoningType == 'type I' or reasoningType == 'I':
             # Can return a simpler model since the task is simple
-            return GPT.GPT4OMNIMINI
+            return GPT.GPT4OMNI
         elif reasoningType == 'type II' or reasoningType == 'II':
             # Should return a more sophisticated model
             return GPT.GPT4OMNI
@@ -124,10 +128,47 @@ GOAL DESCRIPTION
 
 TASK
 {self.task}
-If you end up creating a graph (Option 2), avoid creating nodes from the state history (STATE HISTORY). The nodes cannot contain the following node: {self.goal}
+YOU MUST LEVERAGE THE RESULTS IN THE STATE HISTORY WHEN POSSIBLE, AND AVOID CREATING TYPE II TASKS AND GRAPHS WHEN THEY ARE NOT NEEDED.
+'''
+
+#         If you end up creating a graph (Option 2), avoid creating nodes from the state history (STATE HISTORY). The nodes cannot contain the following node: {self.goal}.
+# If you end up in an infinite cycle or loop in the state history, it is your responsibility to cleverly create the graph in a way that resolves the loop.
+
+        return prompt
+
+
+    async def selectRelevantState(self):
+
+        prompt = f'''You will be presented with the following:
+
+- Full State History (FULL STATE HISTORY): This is a list of all previously taken steps along with their returned values.
+- Goal (GOAL): A goal you MUST achieve.
+- Goal Description (GOAL DESCRIPTION): A more detailed description of the goal (GOAL).
+- Task (TASK): A task to perform given the full state history (STATE HISTORY) and the goal (GOAL).
+
+Here is the information:
+
+FULL STATE HISTORY
+{self.state}
+
+GOAL
+{self.goal}
+
+GOAL DESCRIPTION
+{self.description}
+
+TASK
+Select and filter the state history (STATE HISTORY) items that are relevant to the goal (GOAL), while removing irrelevant items. Use the goal (GOAL) and goal description (GOAL description) to inform you about what you think you will need.
+
+OUTPUT FORMAT (JSON)
+Your output must be a JSON object that contains the following keys:
+"filtered_state_history": The new filtered state history to elements that are relevant to the task. It must be of the same structure as the full state history, and it must use the same keys for the kept items.
+
 '''
         
-        return prompt
+        outputJSON, _ = await gpt(self.gptModel, self.systemMessage, prompt, outputType=GPTOutputType.JSON)
+
+        return outputJSON['filtered_state_history']
     
 
     async def run(self, inputJSONs=None):
@@ -163,9 +204,11 @@ If you end up creating a graph (Option 2), avoid creating nodes from the state h
         if 'answer' in outputJSON.keys():
             # for state in self.state:
             #     for key, value in state:
-            #         if key == self.parentTaskName:
+            #         if key == self.parentTask.humanReadableName:
             #             state[key].append({self.humanReadableName: outputJSON['answer']})
             self.state.append({self.humanReadableName: outputJSON['answer']})
+            if self.parentTask is not None and self.humanReadableName != 'END':
+                self.parentTask.latestOutput = outputJSON['answer']
         else:
             print(f'~~ Going to spin off a new graph for task: {self.humanReadableName}')
             await self.createAndRunGraphForTask()
@@ -199,9 +242,9 @@ If you end up creating a graph (Option 2), avoid creating nodes from the state h
 
             humanReadableName = node['id']
             systemMessage = self.systemMessage
-            parentTaskName = self.humanReadableName
+            parentTask = self
 
-            inputTuple = rulesList, state, goal, expectedOutputJSONSchema, description, reasoningType, parentTaskName
+            inputTuple = rulesList, state, goal, expectedOutputJSONSchema, description, reasoningType, parentTask
 
             if 'conditional' in node:
                 isConditionalNode = True

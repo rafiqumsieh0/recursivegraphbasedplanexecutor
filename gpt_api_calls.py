@@ -30,7 +30,7 @@ async def gpt(modelName, systemMessage, prompt, outputType):
 
         return (outputJSON, None)
 
-    elif outputType is GPTOutputType.JSON:
+    elif outputType == GPTOutputType.JSON:
 
         response = client.chat.completions.create(
         messages=[
@@ -53,7 +53,7 @@ async def gpt(modelName, systemMessage, prompt, outputType):
 
         return (outputJSON, None)
 
-    elif outputType is GPTOutputType.CODE:
+    elif outputType == GPTOutputType.CODE:
 
         response = client.chat.completions.create(
         messages=[
